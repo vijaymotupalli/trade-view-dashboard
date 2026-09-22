@@ -101,6 +101,81 @@
     return detail.primary || detail.han || {};
   };
 
+  const TAB_NAMES = ["market", "stocks", "cassy"];
+  const MARKET_STALE_MS = 24 * 60 * 60 * 1000;
+
+  /**
+   * Switch whichever Market / Stocks / Cassy nodes exist.
+   * A missing button or panel must not freeze the other tabs.
+   */
+  const applyTab = (tab, tabNames) => {
+    const names = Array.isArray(tabNames) && tabNames.length ? tabNames : TAB_NAMES;
+    const requested = names.indexOf(tab) >= 0 ? tab : names[0];
+    const nodes = [];
+    names.forEach((name) => {
+      const btn = document.getElementById("tab-btn-" + name);
+      const panel = document.getElementById("panel-" + name);
+      if (btn && panel) nodes.push({ name: name, btn: btn, panel: panel });
+    });
+    if (!nodes.length) return { active: null, applied: false };
+
+    const known = nodes.some((node) => node.name === requested);
+    const active = known ? requested : nodes[0].name;
+    nodes.forEach((node) => {
+      const on = node.name === active;
+      node.btn.setAttribute("aria-selected", on ? "true" : "false");
+      node.panel.hidden = !on;
+    });
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      const name = btn.getAttribute("data-tab");
+      if (!nodes.some((node) => node.name === name)) {
+        btn.setAttribute("aria-selected", "false");
+      }
+    });
+    return { active: active, applied: known };
+  };
+
+  const marketFeedStamp = (generatedAt, updatedAt) => {
+    if (generatedAt != null && generatedAt !== "" && Number.isFinite(Date.parse(generatedAt))) {
+      return String(generatedAt);
+    }
+    if (updatedAt != null && updatedAt !== "" && Number.isFinite(Date.parse(updatedAt))) {
+      return String(updatedAt);
+    }
+    return "";
+  };
+
+  const isMarketFeedStale = (generatedAt, updatedAt, nowMs) => {
+    const stamp = marketFeedStamp(generatedAt, updatedAt);
+    const ms = Date.parse(stamp);
+    if (!Number.isFinite(ms)) return false;
+    const now = Number.isFinite(nowMs) ? nowMs : Date.now();
+    return now - ms > MARKET_STALE_MS;
+  };
+
+  const marketPausedNoticeHtml = (generatedAt, updatedAt, nowMs) => {
+    if (!isMarketFeedStale(generatedAt, updatedAt, nowMs)) return "";
+    const stamp = marketFeedStamp(generatedAt, updatedAt);
+    return (
+      '<div class="panel market-notice market-stale" role="status">' +
+      "<strong>Market feed paused — last update " +
+      formatGenerated(stamp) +
+      ".</strong></div>"
+    );
+  };
+
+  const mountMarketPausedNotice = (root, generatedAt, updatedAt, nowMs) => {
+    if (!root || typeof root.insertAdjacentHTML !== "function") return false;
+    if (typeof root.querySelector === "function") {
+      const existing = root.querySelector(".market-stale");
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+    }
+    const html = marketPausedNoticeHtml(generatedAt, updatedAt, nowMs);
+    if (!html) return false;
+    root.insertAdjacentHTML("afterbegin", html);
+    return true;
+  };
+
   window.TradeDesk = {
     $,
     escapeHtml,
@@ -114,8 +189,15 @@
     impactClass,
     signalTone,
     primaryView,
+    applyTab,
+    marketFeedStamp,
+    isMarketFeedStale,
+    marketPausedNoticeHtml,
+    mountMarketPausedNotice,
     CLASS_ORDER,
     DATA_URL,
     MARKET_URL,
+    TAB_NAMES,
+    MARKET_STALE_MS,
   };
 })();

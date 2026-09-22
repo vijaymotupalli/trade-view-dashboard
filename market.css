@@ -13,6 +13,9 @@
   color: var(--amber);
   font-size: 0.875rem;
 }
+.market-stale {
+  margin: 0 0 0.85rem;
+}
 .market-top {
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;

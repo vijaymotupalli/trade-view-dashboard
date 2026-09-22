@@ -35,9 +35,140 @@
   }
 
   function findTickerDetail(tickers, symbol) {
-    const key = String(symbol || "").toUpperCase();
+    const key = String(symbol || "").trim().toUpperCase();
     if (!key || !Array.isArray(tickers)) return null;
-    return tickers.find((t) => String(t.ticker || "").toUpperCase() === key) || null;
+    return (
+      tickers.find((t) => String((t && (t.ticker || t.symbol)) || "").trim().toUpperCase() === key) ||
+      null
+    );
+  }
+
+  function present(value) {
+    if (value == null) return false;
+    if (typeof value === "string") return value.trim() !== "";
+    if (typeof value === "number") return Number.isFinite(value);
+    if (Array.isArray(value)) return value.length > 0;
+    return false;
+  }
+
+  function firstPresent(list) {
+    for (let i = 0; i < list.length; i++) {
+      if (present(list[i])) return list[i];
+    }
+    return "";
+  }
+
+  function sameTicker(a, b) {
+    const left = String(a || "").trim().toUpperCase();
+    const right = String(b || "").trim().toUpperCase();
+    return !!left && left === right;
+  }
+
+  function cassyBag(source) {
+    if (!source || typeof source !== "object" || !source.cassy || typeof source.cassy !== "object") {
+      return {};
+    }
+    return source.cassy;
+  }
+
+  function enrichCassyRow(row, detail, best) {
+    const src = row && typeof row === "object" ? row : {};
+    const item = detail && typeof detail === "object" ? detail : {};
+    const levels = cassyBag(item);
+    const rowLevels = cassyBag(src);
+    const mergedLevels = {};
+    ["summary", "direction", "entry", "target", "stop"].forEach((key) => {
+      const value = firstPresent([levels[key], rowLevels[key]]);
+      if (present(value)) mergedLevels[key] = value;
+    });
+    const analysis = item.analysis && typeof item.analysis === "object" ? item.analysis : {};
+    const ticker = firstPresent([src.ticker, src.symbol, item.ticker, item.symbol]);
+    const matchedBest =
+      best && sameTicker(best.ticker || best.symbol, ticker) ? best : null;
+    const analysisTargets = Array.isArray(analysis.targets) ? analysis.targets : [];
+    const bestTargets =
+      matchedBest && Array.isArray(matchedBest.targets) ? matchedBest.targets : [];
+    return {
+      ticker: ticker,
+      company: firstPresent([src.company, src.name, item.company, item.name]),
+      current_price: firstPresent([
+        src.current_price,
+        item.current_price,
+        matchedBest && matchedBest.current_price,
+      ]),
+      class: firstPresent([src.class, item.class, analysis.class]),
+      direction: firstPresent([src.direction, mergedLevels.direction, analysis.direction]),
+      entry: firstPresent([
+        src.entry,
+        mergedLevels.entry,
+        analysis.preferred_entry,
+        matchedBest && matchedBest.preferred_entry,
+      ]),
+      target: firstPresent([
+        src.target,
+        mergedLevels.target,
+        analysisTargets.length ? analysisTargets : "",
+        bestTargets.length ? bestTargets : "",
+      ]),
+      stop: firstPresent([
+        src.stop,
+        mergedLevels.stop,
+        analysis.stop,
+        matchedBest && matchedBest.stop,
+      ]),
+      status: firstPresent([src.status, item.status]),
+      my_rating: firstPresent([src.my_rating, src.rating, item.my_rating, analysis.confidence]),
+      post_url: firstPresent([src.post_url, src.url, item.post_url, item.url]),
+      post_time_et: firstPresent([
+        src.post_time_et,
+        src.post_time,
+        item.post_time_et,
+        item.post_time,
+      ]),
+      _detail: item.ticker || item.symbol || item.cassy || item.analysis ? item : null,
+      _levels: mergedLevels,
+      _best: matchedBest,
+      _analysisText: typeof item.analysis === "string" ? item.analysis : "",
+    };
+  }
+
+  function detailForCassyExpand(row) {
+    const detail = row._detail && typeof row._detail === "object" ? Object.assign({}, row._detail) : {};
+    const levels = Object.assign({}, row._levels || {});
+    if (!present(levels.summary) && row._best && present(row._best.cassy_view)) {
+      levels.summary = row._best.cassy_view;
+    }
+    detail.cassy = levels;
+    if (row._analysisText) detail.analysis = row._analysisText;
+    if (row._best) {
+      const best = row._best;
+      if (detail.analysis && typeof detail.analysis === "object") {
+        const analysis = Object.assign({}, detail.analysis);
+        if (!present(analysis.preferred_entry) && present(best.preferred_entry)) {
+          analysis.preferred_entry = best.preferred_entry;
+        }
+        if ((!Array.isArray(analysis.targets) || !analysis.targets.length) && Array.isArray(best.targets)) {
+          analysis.targets = best.targets;
+        }
+        if (!present(analysis.stop) && present(best.stop)) analysis.stop = best.stop;
+        if (!present(analysis.opinion) && present(best.my_view)) analysis.opinion = best.my_view;
+        detail.analysis = analysis;
+      } else if (
+        !present(detail.analysis) &&
+        (present(best.my_view) ||
+          present(best.preferred_entry) ||
+          (Array.isArray(best.targets) && best.targets.length) ||
+          present(best.stop))
+      ) {
+        detail.analysis = {
+          preferred_entry: best.preferred_entry,
+          targets: best.targets,
+          stop: best.stop,
+          opinion: best.my_view || "",
+        };
+      }
+    }
+    return detail;
   }
 
   function cassyLevels(detail) {
@@ -148,10 +279,14 @@
         extraChips.push("Targets " + best.targets.map(levelText).join(" | "));
       }
     }
-    const viewNote =
-      cassyStrip && typeof best.cassy_view === "string" && best.cassy_view.trim()
-        ? '<p class="strip-note">' + escapeHtml(best.cassy_view.trim()) + "</p>"
-        : "";
+    const viewNotes = [];
+    if (cassyStrip && typeof best.cassy_view === "string" && best.cassy_view.trim()) {
+      viewNotes.push(escapeHtml(best.cassy_view.trim()));
+    }
+    if (cassyStrip && typeof best.my_view === "string" && best.my_view.trim()) {
+      viewNotes.push("<strong>My view:</strong> " + escapeHtml(best.my_view.trim()));
+    }
+    const viewNote = viewNotes.map((note) => '<p class="strip-note">' + note + "</p>").join("");
     return (
       '<div class="stocks-strip panel" aria-label="Best opportunity">' +
       '<div class="strip-left">' +
@@ -316,8 +451,24 @@
       tableBody = '<tr><td colspan="' + colCount + '">No dashboard rows.</td></tr>';
     } else {
       tableBody = sorted
-        .map((row, idx) => {
-          const cls = escapeHtml(row.class || "watchlist");
+        .map((rawRow, idx) => {
+          const matched =
+            findTickerDetail(tickers, rawRow && (rawRow.ticker || rawRow.symbol)) ||
+            (resilient ? rawRow && rawRow._detail : null);
+          const row =
+            opts.levelsKey === "cassy"
+              ? enrichCassyRow(rawRow, matched, stocksData.best_opportunity)
+              : rawRow;
+          const detail = opts.levelsKey === "cassy" ? detailForCassyExpand(row) : matched;
+          const className =
+            opts.levelsKey === "cassy" ? row.class || "" : row.class || "watchlist";
+          const cls = escapeHtml(className || "na");
+          const classLabel =
+            opts.levelsKey === "cassy"
+              ? className
+                ? formatClass(className)
+                : "—"
+              : formatClass(row.class);
           const dirRaw = String(row.direction || "");
           const dirKey = opts.levelsKey === "cassy" ? dirRaw.toLowerCase() : "";
           const dirToken =
@@ -329,7 +480,7 @@
           const dirClass = escapeHtml(dirToken);
           const dir = escapeHtml(dirRaw);
           const priceLabel = formatPrice(row.current_price);
-          const detail = findTickerDetail(tickers, row.ticker) || (resilient ? row._detail : null);
+          const targetHtml = Array.isArray(row.target) ? formatTargets(row.target) : formatPrice(row.target);
           const expandId = idPrefix + "expand-" + idx;
 
           const mainRow =
@@ -350,7 +501,7 @@
             '<td><span class="class-pill class-' +
             cls +
             '">' +
-            escapeHtml(formatClass(row.class)) +
+            escapeHtml(classLabel) +
             "</span></td>" +
             '<td class="dir-' +
             dirClass +
@@ -361,7 +512,7 @@
             escapeHtml(row.entry) +
             "</td>" +
             '<td class="mono">' +
-            formatPrice(row.target) +
+            targetHtml +
             "</td>" +
             '<td class="mono">' +
             formatPrice(row.stop) +
