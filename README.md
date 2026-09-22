@@ -73,6 +73,8 @@ No build step is required — the site is vanilla HTML/CSS/JS (+ Supabase JS fro
 - Unauthenticated visitors see a centered **Trade Desk** login card: **Sign in with Google** first, then optional magic-link form (no Market/Stocks/Cassy data)
 - Authenticated users: header shows email + **Sign out**; app fetches `dashboard_feeds` and maps `stocks` (or legacy `han_view`) → Stocks, `cary_market` → Market, `cassy` → Cassy
 - Header feed badge: **Live feeds** when Market, Stocks, and Cassy payloads are all present; **Partial feeds** when only some are present
+- Tab clicks switch whichever Market / Stocks / Cassy button and panel exist. One missing id does not freeze the other tabs
+- When Cary `generated_at` is older than 24 hours — or `updated_at` if `generated_at` is missing — the Market panel shows **Market feed paused — last update …**. Publishing stays paused; the client does not resume Cary
 - Market news items show `source_name` (citation) and a **Read full story** link when `url` is present; otherwise muted “No link” (no invented URLs)
 - Fed / snapshot / levels / scenarios / catalysts live in a collapsible **Details** section (closed by default)
 - Stocks table sorts `high_conviction` → `watchlist` → `avoid`; click a row to expand inline analysis from `tickers[]`
@@ -158,9 +160,9 @@ Per-ticker detail may include:
 Same table shape as Stocks. Levels are **not** read from `han` or `primary`.
 
 - `generated_at`, `source`, optional `trader`, `window`
-- `dashboard[]` — table rows (ticker, company, price, class, direction, entry, target, stop, status, rating, post)
+- `dashboard[]` — table rows. Live rows often include `ticker`, `current_price`, `my_rating`, `post_url`, and `post_time_et`. Direction, entry, target, and stop are filled from the matching `tickers[].cassy` object when the row omits them. `han` / `primary` are not required
 - `tickers[]` — `{ ticker, cassy, analysis }`. Expand panel labels **Cassy** from `tickers[].cassy` (`summary`, `direction`, `entry`, `target`, `stop`) and **Cassy analysis** from `tickers[].analysis`
-- `best_opportunity` — strip (`action`, `ticker`, `current_price`, plus `targets`, `stop`, `preferred_entry`, `cassy_view` when present)
+- `best_opportunity` — strip (`action`, `ticker`, `current_price`, plus `targets`, `stop`, `preferred_entry`, `cassy_view`, and `my_view` when present). For that ticker, expand analysis uses `my_view`, `preferred_entry`, and `targets` when `analysis` does not already set them
 - `meta` — `ticker_count`, `fill_ins`, `fill_in_tickers`, optional `post_count` and `note`
 - `market_context.note` — shown in the footer as Cassy context
 - `posts[]` — used only when `dashboard` is empty
