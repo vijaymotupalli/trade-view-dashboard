@@ -155,15 +155,17 @@ Per-ticker detail may include:
 
 ### Cassy feed (`cassy`)
 
-Same table as Stocks. Useful fields:
+Same table shape as Stocks. Levels are **not** read from `han` or `primary`.
 
-- `generated_at`, `source`
-- `dashboard[]` and/or `tickers[]` (deep analysis matched by ticker)
-- `posts[]` — used when `dashboard` is empty
-- `best_opportunity` — optional strip
-- `meta` — optional fill-in counts (`filled` / `fill_in_count` and `total` / `ticker_count`, or `meta.fill_in`)
+- `generated_at`, `source`, optional `trader`, `window`
+- `dashboard[]` — table rows (ticker, company, price, class, direction, entry, target, stop, status, rating, post)
+- `tickers[]` — `{ ticker, cassy, analysis }`. Expand panel labels **Cassy** from `tickers[].cassy` (`summary`, `direction`, `entry`, `target`, `stop`) and **Cassy analysis** from `tickers[].analysis`
+- `best_opportunity` — strip (`action`, `ticker`, `current_price`, plus `targets`, `stop`, `preferred_entry`, `cassy_view` when present)
+- `meta` — `ticker_count`, `fill_ins`, `fill_in_tickers`, optional `post_count` and `note`
+- `market_context.note` — shown in the footer as Cassy context
+- `posts[]` — used only when `dashboard` is empty
 
-The Cassy panel says **Cassy trades** and **Cassy analysis**. It does not use Han labels. If the row is missing or has no tickers, posts, dashboard rows, or best opportunity, the panel shows **No Cassy feed yet**. Live prices use the same `.js-live-price[data-ticker]` hooks as Stocks.
+The panel title is **Cassy trades**. If the row is missing or has no dashboard rows, tickers, posts, or best opportunity, it shows **No Cassy feed yet**. Live prices use the same `.js-live-price[data-ticker]` hooks as Stocks.
 
 ### `best_opportunity.action` values
 

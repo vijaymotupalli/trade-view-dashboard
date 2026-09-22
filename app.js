@@ -129,6 +129,10 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
           escapeHtml(cassyData.source || "Cassy") +
           "</div>"
       );
+      const cassyNote = cassyData.market_context && cassyData.market_context.note;
+      if (cassyNote) {
+        parts.push("<div><strong>Cassy context:</strong> " + escapeHtml(cassyNote) + "</div>");
+      }
     } else {
       parts.push("<div><strong>Cassy feed:</strong> unavailable</div>");
     }
@@ -216,7 +220,8 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
       sectionSub:
         "Cassy research · high conviction → watchlist → avoid · click a row for analysis · ticker & price open on Robinhood",
       analysisTitle: "Cassy analysis",
-      notesKey: "cassy",
+      levelsKey: "cassy",
+      levelsTitle: "Cassy",
       resilient: true,
       emptyHtml:
         '<div class="panel market-notice"><strong>No Cassy feed yet.</strong></div>',
