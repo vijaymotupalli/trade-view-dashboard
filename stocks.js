@@ -40,17 +40,38 @@
     return tickers.find((t) => String(t.ticker || "").toUpperCase() === key) || null;
   }
 
-  function renderExpandAnalysis(detail, ticker) {
+  function cassyLevels(detail) {
+    if (!detail || !detail.cassy || typeof detail.cassy !== "object") return {};
+    return detail.cassy;
+  }
+
+  function renderExpandAnalysis(detail, ticker, opts) {
+    const options = opts || {};
     if (!detail) {
       return '<p class="expand-empty">No deep analysis yet for ' + escapeHtml(ticker) + ".</p>";
     }
-    const primary = primaryView(detail);
-    const analysis = detail.analysis || {};
+    const useCassyLevels = options.levelsKey === "cassy";
+    const primary = useCassyLevels ? cassyLevels(detail) : primaryView(detail);
+    const levelsTitle = useCassyLevels ? options.levelsTitle || "Cassy" : "Primary view";
+    let analysis = {};
+    let opinion = "";
+    if (options.resilient && typeof detail.analysis === "string") {
+      opinion = detail.analysis;
+    } else if (detail.analysis && typeof detail.analysis === "object") {
+      analysis = detail.analysis;
+      opinion = analysis.opinion;
+    } else if (!options.resilient) {
+      analysis = detail.analysis || {};
+      opinion = analysis.opinion;
+    }
     const risks = Array.isArray(analysis.risks) ? analysis.risks : [];
+    const analysisTitle = options.analysisTitle || "My analysis";
 
     return (
       '<div class="card-cols">' +
-      '<div class="col-box"><h4>Primary view</h4><dl class="kv">' +
+      '<div class="col-box"><h4>' +
+      escapeHtml(levelsTitle) +
+      "</h4><dl class=\"kv\">" +
       '<dt>Summary</dt><dd style="font-family:var(--font)">' +
       escapeHtml(primary.summary) +
       "</dd>" +
@@ -66,7 +87,9 @@
       "<dt>Stop</dt><dd>" +
       formatPrice(primary.stop) +
       "</dd></dl></div>" +
-      '<div class="col-box mine"><h4>My analysis</h4><dl class="kv">' +
+      '<div class="col-box mine"><h4>' +
+      escapeHtml(analysisTitle) +
+      "</h4><dl class=\"kv\">" +
       "<dt>Preferred</dt><dd>" +
       escapeHtml(analysis.preferred_entry) +
       "</dd>" +
@@ -89,7 +112,7 @@
       escapeHtml(analysis.horizon) +
       "</dd></dl>" +
       '<p class="opinion">' +
-      escapeHtml(analysis.opinion) +
+      escapeHtml(opinion) +
       "</p>" +
       (risks.length
         ? '<ul class="risks">' +
@@ -103,11 +126,32 @@
     );
   }
 
-  function renderCompactStrip(best) {
+  function formatWindow(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    return raw.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  function renderCompactStrip(best, opts) {
+    const options = opts || {};
     if (!best) {
       return '<div class="stocks-strip panel"><p class="section-sub">No best opportunity in data.</p></div>';
     }
     const actionClass = "action-" + escapeHtml(best.action || "WATCH_ONLY");
+    const cassyStrip = options.levelsKey === "cassy";
+    const extraChips = [];
+    if (cassyStrip) {
+      const levelText = (value) => (typeof value === "number" ? formatPrice(value) : String(value));
+      if (best.preferred_entry) extraChips.push("Entry " + String(best.preferred_entry));
+      if (best.stop != null && best.stop !== "") extraChips.push("Stop " + levelText(best.stop));
+      if (Array.isArray(best.targets) && best.targets.length) {
+        extraChips.push("Targets " + best.targets.map(levelText).join(" | "));
+      }
+    }
+    const viewNote =
+      cassyStrip && typeof best.cassy_view === "string" && best.cassy_view.trim()
+        ? '<p class="strip-note">' + escapeHtml(best.cassy_view.trim()) + "</p>"
+        : "";
     return (
       '<div class="stocks-strip panel" aria-label="Best opportunity">' +
       '<div class="strip-left">' +
@@ -125,8 +169,13 @@
       '<span class="meta-chip mono">' +
       livePriceLink(best.ticker, formatPrice(best.current_price)) +
       "</span>" +
+      extraChips
+        .map((chip) => '<span class="meta-chip mono">' + escapeHtml(chip) + "</span>")
+        .join("") +
       robinhoodLink(best.ticker, "Open on Robinhood", "meta-chip rh-chip") +
-      "</div></div>"
+      "</div>" +
+      viewNote +
+      "</div>"
     );
   }
 
@@ -142,18 +191,124 @@
     });
   }
 
-  function renderStocksTab(stocksData) {
-    const root = document.querySelector("#stocks-root");
+  function numberField(obj, keys) {
+    if (!obj || typeof obj !== "object") return null;
+    for (let i = 0; i < keys.length; i++) {
+      const value = obj[keys[i]];
+      if (value == null || value === "") continue;
+      const n = Number(value);
+      if (Number.isFinite(n)) return n;
+    }
+    return null;
+  }
+
+  function metaFillLine(meta) {
+    if (!meta || typeof meta !== "object") return "";
+    const src = meta.fill_in && typeof meta.fill_in === "object" ? meta.fill_in : meta;
+    const filled = numberField(src, [
+      "fill_ins",
+      "filled",
+      "filled_count",
+      "fill_in_count",
+      "with_analysis",
+      "complete_count",
+    ]);
+    const total = numberField(src, ["ticker_count", "total", "total_count", "expected"]);
+    const parts = [];
+    if (filled != null && total != null) parts.push(filled + " of " + total + " filled in");
+    else if (filled != null) parts.push(filled + " filled in");
+    if (Array.isArray(meta.fill_in_tickers)) {
+      const names = meta.fill_in_tickers
+        .map((name) => String(name || "").trim())
+        .filter(Boolean);
+      if (names.length) parts.push("Fill-ins: " + names.join(", "));
+    }
+    const postCount = numberField(meta, ["post_count"]);
+    if (postCount != null) parts.push(postCount + (postCount === 1 ? " post" : " posts"));
+    if (typeof meta.note === "string" && meta.note.trim()) parts.push(meta.note.trim());
+    return parts.join(" · ");
+  }
+
+  function tickerToRow(detail) {
+    const item = detail && typeof detail === "object" ? detail : {};
+    const cassy = item.cassy && typeof item.cassy === "object" ? item.cassy : null;
+    const primary = cassy || primaryView(item);
+    const analysis = item.analysis && typeof item.analysis === "object" ? item.analysis : {};
+    const levels = item.levels && typeof item.levels === "object" ? item.levels : {};
+    const targets = Array.isArray(analysis.targets) ? analysis.targets : [];
+    return {
+      ticker: item.ticker || item.symbol || "",
+      company: item.company || item.name || item.headline || item.title || "",
+      current_price: item.current_price ?? primary.current_price ?? analysis.current_price ?? levels.price,
+      class: item.class || analysis.class || "watchlist",
+      direction: item.direction || primary.direction || analysis.direction || levels.direction || "",
+      entry: item.entry || primary.entry || analysis.preferred_entry || levels.entry || "",
+      target: item.target ?? primary.target ?? (targets.length ? targets[0] : levels.target),
+      stop: item.stop ?? primary.stop ?? analysis.stop ?? levels.stop,
+      status: item.status || analysis.status || "",
+      my_rating: item.my_rating || item.rating || analysis.confidence || "",
+      post_url: item.post_url || item.url || "",
+      post_time_et: item.post_time_et || item.post_time || item.time || "",
+      _detail: item,
+    };
+  }
+
+  function resolveDashboardRows(data, resilient) {
+    const dashboard = Array.isArray(data.dashboard) ? data.dashboard : null;
+    if (!resilient) return data.dashboard;
+    if (dashboard && dashboard.length) return dashboard;
+    const posts = Array.isArray(data.posts) ? data.posts : null;
+    if (posts && posts.length) return posts.map(tickerToRow);
+    const tickers = Array.isArray(data.tickers) ? data.tickers : [];
+    if (tickers.length) return tickers.map(tickerToRow);
+    return dashboard || [];
+  }
+
+  function renderPostCell(row, resilient) {
+    const time =
+      '<span class="post-time">' + escapeHtml(row.post_time_et) + "</span>";
+    if (resilient && !row.post_url) {
+      return '<span class="story-nolink">No link</span>' + time;
+    }
+    return (
+      '<a class="post-link" href="' +
+      escapeHtml(row.post_url) +
+      '" target="_blank" rel="noopener noreferrer">View</a>' +
+      time
+    );
+  }
+
+  function renderStocksTab(stocksData, options) {
+    const opts = options || {};
+    const root = document.querySelector(opts.root || "#stocks-root");
     if (!root) return;
 
     if (!stocksData) {
       root.innerHTML =
+        opts.emptyHtml ||
         '<div class="panel market-notice"><strong>Stocks feed unavailable.</strong> Could not load protected feed data.</div>';
       return;
     }
 
+    const resilient = !!opts.resilient;
+    const idPrefix = opts.idPrefix ? String(opts.idPrefix) + "-" : "";
+    const titleId = idPrefix + "dashboard-title";
+    const tableId = idPrefix ? idPrefix + "dash-table" : "dash-table";
+    const bodyId = idPrefix ? idPrefix + "dash-body" : "dash-body";
+    const sectionTitle = opts.sectionTitle || "Trade Desk";
+    const sectionSub =
+      opts.sectionSub ||
+      "High conviction → watchlist → avoid · click a row for deep analysis · ticker & price open on Robinhood";
+    const metaParts = [];
+    if (resilient) {
+      if (stocksData.trader) metaParts.push(String(stocksData.trader));
+      if (stocksData.window) metaParts.push(formatWindow(stocksData.window));
+      const fillLine = metaFillLine(stocksData.meta);
+      if (fillLine) metaParts.push(fillLine);
+    }
+    const metaLine = metaParts.join(" · ");
     const tickers = stocksData.tickers || [];
-    const sorted = sortDashboard(stocksData.dashboard);
+    const sorted = sortDashboard(resolveDashboardRows(stocksData, resilient));
     const colCount = 11;
 
     let tableBody;
@@ -164,11 +319,18 @@
         .map((row, idx) => {
           const cls = escapeHtml(row.class || "watchlist");
           const dirRaw = String(row.direction || "");
-          const dirClass = escapeHtml(dirRaw.replace(/[^A-Za-z]/g, "").toUpperCase() || "NA");
+          const dirKey = opts.levelsKey === "cassy" ? dirRaw.toLowerCase() : "";
+          const dirToken =
+            opts.levelsKey === "cassy" && /bear|short|put/.test(dirKey)
+              ? "SHORT"
+              : opts.levelsKey === "cassy" && /bull|long|call/.test(dirKey)
+                ? "LONG"
+                : dirRaw.replace(/[^A-Za-z]/g, "").toUpperCase() || "NA";
+          const dirClass = escapeHtml(dirToken);
           const dir = escapeHtml(dirRaw);
           const priceLabel = formatPrice(row.current_price);
-          const detail = findTickerDetail(tickers, row.ticker);
-          const expandId = "expand-" + idx;
+          const detail = findTickerDetail(tickers, row.ticker) || (resilient ? row._detail : null);
+          const expandId = idPrefix + "expand-" + idx;
 
           const mainRow =
             '<tr class="dash-row" data-expand="' +
@@ -210,12 +372,9 @@
             '<td class="mono">' +
             escapeHtml(row.my_rating) +
             "</td>" +
-            '<td><a class="post-link" href="' +
-            escapeHtml(row.post_url) +
-            '" target="_blank" rel="noopener noreferrer">View</a>' +
-            '<span class="post-time">' +
-            escapeHtml(row.post_time_et) +
-            "</span></td>" +
+            "<td>" +
+            renderPostCell(row, resilient) +
+            "</td>" +
             "</tr>";
 
           const expandRow =
@@ -225,7 +384,7 @@
             '<td colspan="' +
             colCount +
             '"><div class="expand-body">' +
-            renderExpandAnalysis(detail, row.ticker) +
+            renderExpandAnalysis(detail, row.ticker, opts) +
             "</div></td></tr>";
 
           return mainRow + expandRow;
@@ -234,20 +393,33 @@
     }
 
     root.innerHTML =
-      renderCompactStrip(stocksData.best_opportunity) +
-      '<section class="section" aria-labelledby="dashboard-title">' +
+      renderCompactStrip(stocksData.best_opportunity, opts) +
+      '<section class="section" aria-labelledby="' +
+      titleId +
+      '">' +
       '<div class="section-head">' +
-      '<h2 id="dashboard-title">Trade Desk</h2>' +
-      '<p class="section-sub">High conviction → watchlist → avoid · click a row for deep analysis · ticker &amp; price open on Robinhood</p>' +
+      '<h2 id="' +
+      titleId +
+      '">' +
+      escapeHtml(sectionTitle) +
+      "</h2>" +
+      '<p class="section-sub">' +
+      escapeHtml(sectionSub) +
+      "</p>" +
+      (metaLine ? '<p class="section-sub">' + escapeHtml(metaLine) + "</p>" : "") +
       "</div>" +
       '<div class="table-wrap panel">' +
-      '<table class="dash-table" id="dash-table">' +
+      '<table class="dash-table" id="' +
+      tableId +
+      '">' +
       "<thead><tr>" +
       '<th class="expand-th" aria-label="Expand"></th>' +
       "<th>Ticker</th><th>Current price</th><th>Class</th><th>Dir</th>" +
       "<th>Entry</th><th>Target</th><th>Stop</th><th>Status</th><th>Rating</th><th>Post</th>" +
       "</tr></thead>" +
-      '<tbody id="dash-body">' +
+      '<tbody id="' +
+      bodyId +
+      '">' +
       tableBody +
       "</tbody></table></div></section>";
 
@@ -259,11 +431,12 @@
     if (!id) return;
     const expand = document.getElementById(id);
     if (!expand) return;
+    const scope = row.closest("#stocks-root, #cassy-root") || document;
     const open = expand.hidden === false;
-    document.querySelectorAll(".expand-row").forEach((r) => {
+    scope.querySelectorAll(".expand-row").forEach((r) => {
       r.hidden = true;
     });
-    document.querySelectorAll(".dash-row").forEach((r) => {
+    scope.querySelectorAll(".dash-row").forEach((r) => {
       r.classList.remove("is-expanded");
       r.setAttribute("aria-expanded", "false");
     });

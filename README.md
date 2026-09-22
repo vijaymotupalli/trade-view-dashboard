@@ -1,15 +1,16 @@
 # Trade Desk
 
-Dark-mode-first, mobile-friendly static dashboard with a **two-tab** layout:
+Dark-mode-first, mobile-friendly static dashboard with a **three-tab** layout:
 
 - **Market** — Cary market sentiment, signal score, outlook chips, and a news list of `top_stories` (with citations / links when present)
 - **Stocks** — Trade Desk table (expandable rows for deep analysis / primary trader notes) + compact best-opportunity strip
+- **Cassy** — Cassy research in the same table (feed id `cassy`). Missing or empty payloads show **No Cassy feed yet**
 
 **Not financial advice.** This site is for research and educational purposes only. Trading involves risk of loss.
 
 Feeds are stored in **Supabase** (`public.dashboard_feeds`) with RLS: **authenticated SELECT only**. The static GitHub Pages site uses **Google OAuth** (primary) plus optional magic-link auth (email OTP) via the public anon key.
 
-> The GitHub repo / Pages path is `trade-view-dashboard`; the product name in the UI is **Trade Desk**. Prefer feed id `stocks` for the Stocks tab (legacy id `han_view` is still accepted by the client). Market feed id remains `cary_market`.
+> The GitHub repo / Pages path is `trade-view-dashboard`; the product name in the UI is **Trade Desk**. Prefer feed id `stocks` for the Stocks tab (legacy id `han_view` is still accepted by the client). Market feed id remains `cary_market`. Cassy research uses feed id `cassy`.
 
 ## Live site
 
@@ -67,10 +68,11 @@ No build step is required — the site is vanilla HTML/CSS/JS (+ Supabase JS fro
 
 ## UI notes
 
-- Sticky tab bar: **Market | Stocks** (`aria-selected` on semantic buttons)
-- Default tab: Market if Cary feed loads, else Stocks; last tab remembered in `localStorage` key `trade-desk-tab` (reads legacy `han-dash-tab` once and migrates)
-- Unauthenticated visitors see a centered **Trade Desk** login card: **Sign in with Google** first, then optional magic-link form (no Market/Stocks data)
-- Authenticated users: header shows email + **Sign out**; app fetches `dashboard_feeds` and maps `stocks` (or legacy `han_view`) → Stocks, `cary_market` → Market
+- Sticky tab bar: **Market | Stocks | Cassy** (`aria-selected` on semantic buttons)
+- Default tab: last choice in `localStorage` key `trade-desk-tab` when that feed is present (reads legacy `han-dash-tab` once and migrates `market` / `stocks`); otherwise Market, then Stocks, then Cassy
+- Unauthenticated visitors see a centered **Trade Desk** login card: **Sign in with Google** first, then optional magic-link form (no Market/Stocks/Cassy data)
+- Authenticated users: header shows email + **Sign out**; app fetches `dashboard_feeds` and maps `stocks` (or legacy `han_view`) → Stocks, `cary_market` → Market, `cassy` → Cassy
+- Header feed badge: **Live feeds** when Market, Stocks, and Cassy payloads are all present; **Partial feeds** when only some are present
 - Market news items show `source_name` (citation) and a **Read full story** link when `url` is present; otherwise muted “No link” (no invented URLs)
 - Fed / snapshot / levels / scenarios / catalysts live in a collapsible **Details** section (closed by default)
 - Stocks table sorts `high_conviction` → `watchlist` → `avoid`; click a row to expand inline analysis from `tickers[]`
@@ -80,7 +82,7 @@ No build step is required — the site is vanilla HTML/CSS/JS (+ Supabase JS fro
 
 ## Update data (publish flow)
 
-Live payloads live in Supabase table `public.dashboard_feeds` (ids `stocks` or legacy `han_view`, plus `cary_market`), not in the public JSON files.
+Live payloads live in Supabase table `public.dashboard_feeds` (ids `stocks` or legacy `han_view`, `cary_market`, and `cassy`), not in the public JSON files.
 
 Repo stubs `data/latest.json` and `data/market.json` are placeholders (`login_required`) so raw GitHub URLs no longer leak full feeds. Upsert new payloads into Supabase (service role / SQL / MCP) instead of committing full JSON.
 
@@ -90,13 +92,14 @@ Repo stubs `data/latest.json` and `data/market.json` are placeholders (`login_re
 2. Upsert into `public.dashboard_feeds`:
    - `id = 'cary_market'` → Market tab
    - `id = 'stocks'` → Stocks tab (preferred; client still accepts `han_view` if `stocks` is missing)
-3. Open the live site signed in and confirm both tabs refresh (no Pages redeploy needed for feed-only updates).
+   - `id = 'cassy'` → Cassy tab (same ticker / dashboard shape as Stocks; empty or missing payload shows an empty state)
+3. Open the live site signed in and confirm the tabs refresh (no Pages redeploy needed for feed-only updates).
 
 ## Files
 
 | Path | Role |
 |------|------|
-| `index.html` | App shell (login gate + two-tab layout) |
+| `index.html` | App shell (login gate + Market / Stocks / Cassy tabs) |
 | `login.css` | Centered premium Google + magic-link auth screen |
 | `config.js` | Public Supabase URL + anon key (`TRADE_DESK_SUPABASE`) |
 | `styles.css` | Dark theme base + tab bar + auth helpers (`[hidden]` panel fix) |
@@ -104,7 +107,7 @@ Repo stubs `data/latest.json` and `data/market.json` are placeholders (`login_re
 | `market.css` | Market tab + news list styles |
 | `lib.js` | Shared helpers (`TradeDesk`, Robinhood links, `primaryView`) |
 | `market.js` | Market tab renderer (`TradeDeskMarket`) |
-| `stocks.js` | Stocks tab renderer (`TradeDeskStocks`) |
+| `stocks.js` | Stocks tab renderer (`TradeDeskStocks`); Cassy reuses it with a Cassy label config |
 | `app.js` | Supabase auth (Google OAuth + magic link) + feed fetch + tab switching + footer |
 | `data/latest.json` | Placeholder (data behind auth) |
 | `data/market.json` | Placeholder (data behind auth) |
@@ -149,6 +152,20 @@ Per-ticker detail may include:
 - `primary` — Trade Desk stocks / primary trader notes (`summary`, `direction`, `entry`, `target`, `stop`); UI label is **Primary view**
 - `han` — legacy alias for the same object (still read if `primary` is absent)
 - `analysis` — “My analysis” column (entries, targets, opinion, risks)
+
+### Cassy feed (`cassy`)
+
+Same table shape as Stocks. Levels are **not** read from `han` or `primary`.
+
+- `generated_at`, `source`, optional `trader`, `window`
+- `dashboard[]` — table rows (ticker, company, price, class, direction, entry, target, stop, status, rating, post)
+- `tickers[]` — `{ ticker, cassy, analysis }`. Expand panel labels **Cassy** from `tickers[].cassy` (`summary`, `direction`, `entry`, `target`, `stop`) and **Cassy analysis** from `tickers[].analysis`
+- `best_opportunity` — strip (`action`, `ticker`, `current_price`, plus `targets`, `stop`, `preferred_entry`, `cassy_view` when present)
+- `meta` — `ticker_count`, `fill_ins`, `fill_in_tickers`, optional `post_count` and `note`
+- `market_context.note` — shown in the footer as Cassy context
+- `posts[]` — used only when `dashboard` is empty
+
+The panel title is **Cassy trades**. If the row is missing or has no dashboard rows, tickers, posts, or best opportunity, it shows **No Cassy feed yet**. Live prices use the same `.js-live-price[data-ticker]` hooks as Stocks.
 
 ### `best_opportunity.action` values
 

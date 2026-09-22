@@ -16,6 +16,12 @@
   font-family: var(--mono); font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em;
 }
 .stocks-strip .action-badge { padding: 0.3rem 0.7rem; font-size: 0.72rem; }
+.strip-note {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
 
 .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .dash-table {
