@@ -15,8 +15,13 @@ function renderMarketTab(data) {
     console.error("TradeDeskMarket did not load");
     return false;
   }
-  api.renderMarketTab(data);
-  return true;
+  try {
+    api.renderMarketTab(data);
+    return true;
+  } catch (err) {
+    console.error(err);
+    return false;
+  }
 }
 
 function renderStocksTab(data, options) {
@@ -25,8 +30,13 @@ function renderStocksTab(data, options) {
     console.error("TradeDeskStocks did not load");
     return false;
   }
-  api.renderStocksTab(data, options);
-  return true;
+  try {
+    api.renderStocksTab(data, options);
+    return true;
+  } catch (err) {
+    console.error(err);
+    return false;
+  }
 }
 
 const TAB_KEY = "trade-desk-tab";
@@ -73,46 +83,62 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     return null;
   }
 
+  function switchExistingTabs(requested) {
+    const nodes = [];
+    TABS.forEach((name) => {
+      const btn = $("#tab-btn-" + name);
+      const panel = $("#panel-" + name);
+      if (btn && panel) nodes.push({ name: name, btn: btn, panel: panel });
+    });
+    // One missing button or panel must not freeze the tabs that do exist.
+    if (!nodes.length) return { active: null, applied: false };
+    const known = nodes.some((node) => node.name === requested);
+    const active = known ? requested : nodes[0].name;
+    nodes.forEach((node) => {
+      const on = node.name === active;
+      node.btn.setAttribute("aria-selected", on ? "true" : "false");
+      node.panel.hidden = !on;
+    });
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      const name = btn.getAttribute("data-tab");
+      if (!nodes.some((node) => node.name === name)) {
+        btn.setAttribute("aria-selected", "false");
+      }
+    });
+    return { active: active, applied: known };
+  }
+
   function setTab(tab) {
-    const requested = TABS.indexOf(tab) >= 0 ? tab : "market";
-    let result = null;
-    if (typeof desk.applyTab === "function") {
-      result = desk.applyTab(tab, TABS);
-    } else {
-      const nodes = [];
-      TABS.forEach((name) => {
-        const btn = $("#tab-btn-" + name);
-        const panel = $("#panel-" + name);
-        if (btn && panel) nodes.push({ name: name, btn: btn, panel: panel });
-      });
-      if (!nodes.length) return;
-      const known = nodes.some((node) => node.name === requested);
-      const active = known ? requested : nodes[0].name;
-      nodes.forEach((node) => {
-        const on = node.name === active;
-        node.btn.setAttribute("aria-selected", on ? "true" : "false");
-        node.panel.hidden = !on;
-      });
-      document.querySelectorAll(".tab-btn").forEach((btn) => {
-        const name = btn.getAttribute("data-tab");
-        if (!nodes.some((node) => node.name === name)) {
-          btn.setAttribute("aria-selected", "false");
-        }
-      });
-      result = { active: active, applied: known };
-    }
-    if (!result || !result.applied || !result.active) return;
     try {
-      localStorage.setItem(TAB_KEY, result.active);
-    } catch {
-      /* ignore */
+      const requested = TABS.indexOf(tab) >= 0 ? tab : "market";
+      let result = null;
+      if (typeof desk.applyTab === "function") {
+        try {
+          result = desk.applyTab(tab, TABS);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      if (!result) result = switchExistingTabs(requested);
+      if (!result || !result.applied || !result.active) return;
+      try {
+        localStorage.setItem(TAB_KEY, result.active);
+      } catch {
+        /* ignore */
+      }
+    } catch (err) {
+      console.error(err);
     }
   }
 
   function bindTabs() {
     document.querySelectorAll(".tab-btn").forEach((btn) => {
       btn.addEventListener("click", () => {
-        setTab(btn.getAttribute("data-tab") || "market");
+        try {
+          setTab(btn.getAttribute("data-tab") || "market");
+        } catch (err) {
+          console.error(err);
+        }
       });
     });
   }
@@ -226,6 +252,14 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     $("#user-email").textContent = email || "Signed in";
   }
 
+  // Keep `cassy` in this set. Do not query-filter dashboard_feeds down to a shorter allowlist.
+  const FEED_IDS = {
+    market: "cary_market",
+    stocks: "stocks",
+    stocksLegacy: "han_view",
+    cassy: "cassy",
+  };
+
   async function fetchFeeds() {
     const { data, error } = await supabase
       .from("dashboard_feeds")
@@ -237,13 +271,13 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     let marketUpdatedAt = null;
     let cassyData = null;
     (data || []).forEach((row) => {
-      if (row.id === "stocks") stocksData = row.payload;
-      else if (row.id === "han_view") stocksLegacy = row.payload;
-      if (row.id === "cary_market") {
+      const id = row && String(row.id || "").trim();
+      if (id === FEED_IDS.stocks) stocksData = row.payload;
+      else if (id === FEED_IDS.stocksLegacy) stocksLegacy = row.payload;
+      else if (id === FEED_IDS.market) {
         marketData = row.payload;
         marketUpdatedAt = row.updated_at || null;
-      }
-      if (row.id === "cassy") cassyData = row.payload;
+      } else if (id === FEED_IDS.cassy) cassyData = row.payload;
     });
     // Prefer `stocks`; fall back to legacy feed id `han_view`.
     if (!stocksData) stocksData = stocksLegacy;
@@ -260,24 +294,33 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
   }
 
   function renderCassyTab(cassyData) {
-    const painted = renderStocksTab(cassyHasContent(cassyData) ? cassyData : null, {
-      root: "#cassy-root",
-      idPrefix: "cassy",
-      sectionTitle: "Cassy trades",
-      sectionSub:
-        "Cassy research · high conviction → watchlist → avoid · click a row for analysis · ticker & price open on Robinhood",
-      analysisTitle: "Cassy analysis",
-      levelsKey: "cassy",
-      levelsTitle: "Cassy",
-      resilient: true,
-      emptyHtml:
-        '<div class="panel market-notice"><strong>No Cassy feed yet.</strong></div>',
-    });
-    if (painted) return;
     const root = $("#cassy-root");
-    if (!root) return;
-    root.innerHTML =
-      '<div class="panel market-notice"><strong>Cassy tab unavailable.</strong> The stocks script did not load.</div>';
+    try {
+      const painted = renderStocksTab(cassyHasContent(cassyData) ? cassyData : null, {
+        root: "#cassy-root",
+        idPrefix: "cassy",
+        sectionTitle: "Cassy trades",
+        sectionSub:
+          "Cassy research · high conviction → watchlist → avoid · click a row for analysis · ticker & price open on Robinhood",
+        analysisTitle: "Cassy analysis",
+        levelsKey: "cassy",
+        levelsTitle: "Cassy",
+        resilient: true,
+        emptyHtml:
+          '<div class="panel market-notice"><strong>No Cassy feed yet.</strong></div>',
+      });
+      if (painted || !root) return;
+      const missingApi =
+        !window.TradeDeskStocks || typeof window.TradeDeskStocks.renderStocksTab !== "function";
+      root.innerHTML = missingApi
+        ? '<div class="panel market-notice"><strong>Cassy tab unavailable.</strong> The stocks script did not load.</div>'
+        : '<div class="panel market-notice"><strong>Cassy feed could not be rendered.</strong></div>';
+    } catch (err) {
+      console.error(err);
+      if (!root) return;
+      root.innerHTML =
+        '<div class="panel market-notice"><strong>Cassy feed could not be rendered.</strong></div>';
+    }
   }
 
   function showMarketPausedNotice(marketData, updatedAt) {
@@ -302,59 +345,103 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     );
   }
 
+  function showFeedError(message) {
+    const loading = $("#loading");
+    if (loading) loading.hidden = true;
+    const app = $("#app");
+    if (app) app.hidden = true;
+    const errorPanel = $("#error");
+    if (errorPanel) errorPanel.hidden = false;
+    const errorMessage = $("#error-message");
+    if (errorMessage) errorMessage.textContent = message;
+    try {
+      renderFooter(null, null, null);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   async function loadDashboard() {
-    $("#loading").hidden = false;
-    $("#loading").querySelector("p").textContent = "Loading protected feeds...";
-    $("#error").hidden = true;
+    const loading = $("#loading");
+    if (loading) {
+      loading.hidden = false;
+      const label = loading.querySelector("p");
+      if (label) label.textContent = "Loading protected feeds...";
+    }
+    const errorPanel = $("#error");
+    if (errorPanel) errorPanel.hidden = true;
+
+    let stocksData = null;
+    let marketData = null;
+    let marketUpdatedAt = null;
+    let cassyData = null;
+    try {
+      const feeds = await fetchFeeds();
+      stocksData = feeds.stocksData;
+      marketData = feeds.marketData;
+      marketUpdatedAt = feeds.marketUpdatedAt;
+      cassyData = feeds.cassyData;
+    } catch (err) {
+      console.error(err);
+      showFeedError((err && (err.message || String(err))) || "Failed to load feeds from Supabase.");
+      return;
+    }
+
+    if (loading) loading.hidden = true;
+
+    if (!marketData && !stocksData && !cassyData) {
+      showFeedError("No feed rows returned. Check RLS and that you are signed in.");
+      return;
+    }
+
+    if (errorPanel) errorPanel.hidden = true;
+    const app = $("#app");
+    if (app) app.hidden = false;
+
+    const selectTab = () => {
+      try {
+        setTab(pickDefaultTab(marketData, stocksData, cassyData));
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    // Select a panel before rendering so a Cassy/Stocks throw cannot leave every tab dead or hide #app.
+    selectTab();
 
     try {
-      const { stocksData, marketData, marketUpdatedAt, cassyData } = await fetchFeeds();
-      $("#loading").hidden = true;
-
-      if (!marketData && !stocksData && !cassyData) {
-        $("#error").hidden = false;
-        $("#error-message").textContent =
-          "No feed rows returned. Check RLS and that you are signed in.";
-        $("#app").hidden = true;
-        renderFooter(null, null, null);
-        return;
-      }
-
-      $("#error").hidden = true;
-      $("#app").hidden = false;
-      try {
-        if (!renderMarketTab(marketData)) {
-          const marketRoot = $("#market-root");
-          if (marketRoot) {
-            marketRoot.innerHTML =
-              '<div class="panel market-notice"><strong>Market tab unavailable.</strong> The market script did not load.</div>';
-          }
+      if (!renderMarketTab(marketData)) {
+        const marketRoot = $("#market-root");
+        if (marketRoot) {
+          marketRoot.innerHTML =
+            '<div class="panel market-notice"><strong>Market tab unavailable.</strong> The market script did not load.</div>';
         }
-      } catch (err) {
-        console.error(err);
       }
-      try {
-        showMarketPausedNotice(marketData, marketUpdatedAt);
-      } catch (err) {
-        console.error(err);
-      }
-      try {
-        if (!renderStocksTab(stocksData)) {
-          const stocksRoot = $("#stocks-root");
-          if (stocksRoot) {
-            stocksRoot.innerHTML =
-              '<div class="panel market-notice"><strong>Stocks tab unavailable.</strong> The stocks script did not load.</div>';
-          }
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      showMarketPausedNotice(marketData, marketUpdatedAt);
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      if (!renderStocksTab(stocksData)) {
+        const stocksRoot = $("#stocks-root");
+        if (stocksRoot) {
+          stocksRoot.innerHTML =
+            '<div class="panel market-notice"><strong>Stocks feed could not be rendered.</strong></div>';
         }
-      } catch (err) {
-        console.error(err);
       }
-      try {
-        renderCassyTab(cassyData);
-      } catch (err) {
-        console.error(err);
-      }
-      setTab(pickDefaultTab(marketData, stocksData, cassyData));
+    } catch (err) {
+      console.error(err);
+    }
+    try {
+      renderCassyTab(cassyData);
+    } catch (err) {
+      console.error(err);
+    }
+    selectTab();
+    try {
       if (window.TradeDeskPrices) {
         window.TradeDeskPrices.stop();
         if (stocksData || cassyData) {
@@ -365,15 +452,13 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
           });
         }
       }
+    } catch (err) {
+      console.error(err);
+    }
+    try {
       renderFooter(stocksData, marketData, cassyData);
     } catch (err) {
       console.error(err);
-      $("#loading").hidden = true;
-      $("#app").hidden = true;
-      $("#error").hidden = false;
-      $("#error-message").textContent =
-        (err && (err.message || String(err))) || "Failed to load feeds from Supabase.";
-      renderFooter(null, null, null);
     }
   }
 
