@@ -31,10 +31,12 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     );
   }
 
+  const TABS = ["market", "stocks", "cassy"];
+
   function readSavedTab() {
     try {
       let saved = localStorage.getItem(TAB_KEY);
-      if (saved === "market" || saved === "stocks") return saved;
+      if (TABS.indexOf(saved) >= 0) return saved;
       const legacy = localStorage.getItem(TAB_KEY_LEGACY);
       if (legacy === "market" || legacy === "stocks") {
         localStorage.setItem(TAB_KEY, legacy);
@@ -47,19 +49,20 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
   }
 
   function setTab(tab) {
-    const marketBtn = $("#tab-btn-market");
-    const stocksBtn = $("#tab-btn-stocks");
-    const marketPanel = $("#panel-market");
-    const stocksPanel = $("#panel-stocks");
-    if (!marketBtn || !stocksBtn || !marketPanel || !stocksPanel) return;
+    const active = TABS.indexOf(tab) >= 0 ? tab : "market";
+    const nodes = TABS.map((name) => ({
+      btn: $("#tab-btn-" + name),
+      panel: $("#panel-" + name),
+    }));
+    if (nodes.some((node) => !node.btn || !node.panel)) return;
 
-    const isMarket = tab === "market";
-    marketBtn.setAttribute("aria-selected", isMarket ? "true" : "false");
-    stocksBtn.setAttribute("aria-selected", isMarket ? "false" : "true");
-    marketPanel.hidden = !isMarket;
-    stocksPanel.hidden = isMarket;
+    nodes.forEach((node, i) => {
+      const on = TABS[i] === active;
+      node.btn.setAttribute("aria-selected", on ? "true" : "false");
+      node.panel.hidden = !on;
+    });
     try {
-      localStorage.setItem(TAB_KEY, isMarket ? "market" : "stocks");
+      localStorage.setItem(TAB_KEY, active);
     } catch {
       /* ignore */
     }
@@ -73,15 +76,18 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     });
   }
 
-  function pickDefaultTab(marketData, stocksData) {
+  function pickDefaultTab(marketData, stocksData, cassyData) {
     const saved = readSavedTab();
     if (saved === "market" && marketData) return "market";
     if (saved === "stocks" && stocksData) return "stocks";
+    if (saved === "cassy" && cassyData) return "cassy";
     if (marketData) return "market";
-    return "stocks";
+    if (stocksData) return "stocks";
+    if (cassyData) return "cassy";
+    return "market";
   }
 
-  function renderFooter(stocksData, marketData) {
+  function renderFooter(stocksData, marketData, cassyData) {
     const parts = [];
     if (stocksData) {
       const ctx = stocksData.market_context || {};
@@ -115,11 +121,23 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     } else {
       parts.push("<div><strong>Cary market:</strong> unavailable</div>");
     }
+    if (cassyData) {
+      parts.push(
+        "<div><strong>Cassy feed:</strong> " +
+          escapeHtml(formatGenerated(cassyData.generated_at)) +
+          " / " +
+          escapeHtml(cassyData.source || "Cassy") +
+          "</div>"
+      );
+    } else {
+      parts.push("<div><strong>Cassy feed:</strong> unavailable</div>");
+    }
     $("#footer-meta").innerHTML = parts.join("");
 
     const badgeTimes = [];
     if (marketData && marketData.generated_at) badgeTimes.push(formatGenerated(marketData.generated_at));
     if (stocksData && stocksData.generated_at) badgeTimes.push(formatGenerated(stocksData.generated_at));
+    if (cassyData && cassyData.generated_at) badgeTimes.push(formatGenerated(cassyData.generated_at));
     const badge = $("#generated-badge");
     if (badge) {
       badge.textContent = badgeTimes[0] || "-";
@@ -128,10 +146,11 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
 
     const feedBadge = $("#feed-badge");
     if (feedBadge) {
-      if (stocksData && marketData) {
+      const present = [marketData, stocksData, cassyData].filter(Boolean).length;
+      if (present === 3) {
         feedBadge.textContent = "Live feeds";
         feedBadge.hidden = false;
-      } else if (stocksData || marketData) {
+      } else if (present > 0) {
         feedBadge.textContent = "Partial feeds";
         feedBadge.hidden = false;
       } else {
@@ -168,14 +187,40 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     let stocksData = null;
     let stocksLegacy = null;
     let marketData = null;
+    let cassyData = null;
     (data || []).forEach((row) => {
       if (row.id === "stocks") stocksData = row.payload;
       else if (row.id === "han_view") stocksLegacy = row.payload;
       if (row.id === "cary_market") marketData = row.payload;
+      if (row.id === "cassy") cassyData = row.payload;
     });
     // Prefer `stocks`; fall back to legacy feed id `han_view`.
     if (!stocksData) stocksData = stocksLegacy;
-    return { stocksData, marketData };
+    return { stocksData, marketData, cassyData };
+  }
+
+  function cassyHasContent(data) {
+    if (!data || typeof data !== "object") return false;
+    if (Array.isArray(data.dashboard) && data.dashboard.length) return true;
+    if (Array.isArray(data.tickers) && data.tickers.length) return true;
+    if (Array.isArray(data.posts) && data.posts.length) return true;
+    if (data.best_opportunity && typeof data.best_opportunity === "object") return true;
+    return false;
+  }
+
+  function renderCassyTab(cassyData) {
+    renderStocksTab(cassyHasContent(cassyData) ? cassyData : null, {
+      root: "#cassy-root",
+      idPrefix: "cassy",
+      sectionTitle: "Cassy trades",
+      sectionSub:
+        "Cassy research · high conviction → watchlist → avoid · click a row for analysis · ticker & price open on Robinhood",
+      analysisTitle: "Cassy analysis",
+      notesKey: "cassy",
+      resilient: true,
+      emptyHtml:
+        '<div class="panel market-notice"><strong>No Cassy feed yet.</strong></div>',
+    });
   }
 
   async function loadDashboard() {
@@ -184,15 +229,15 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     $("#error").hidden = true;
 
     try {
-      const { stocksData, marketData } = await fetchFeeds();
+      const { stocksData, marketData, cassyData } = await fetchFeeds();
       $("#loading").hidden = true;
 
-      if (!marketData && !stocksData) {
+      if (!marketData && !stocksData && !cassyData) {
         $("#error").hidden = false;
         $("#error-message").textContent =
           "No feed rows returned. Check RLS and that you are signed in.";
         $("#app").hidden = true;
-        renderFooter(null, null);
+        renderFooter(null, null, null);
         return;
       }
 
@@ -200,9 +245,11 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
       $("#app").hidden = false;
       renderMarketTab(marketData);
       renderStocksTab(stocksData);
+      renderCassyTab(cassyData);
+      setTab(pickDefaultTab(marketData, stocksData, cassyData));
       if (window.TradeDeskPrices) {
         window.TradeDeskPrices.stop();
-        if (stocksData) {
+        if (stocksData || cassyData) {
           window.TradeDeskPrices.start({
             supabase,
             supabaseUrl: cfg.SUPABASE_URL,
@@ -210,8 +257,7 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
           });
         }
       }
-      setTab(pickDefaultTab(marketData, stocksData));
-      renderFooter(stocksData, marketData);
+      renderFooter(stocksData, marketData, cassyData);
     } catch (err) {
       console.error(err);
       $("#loading").hidden = true;
@@ -219,7 +265,7 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
       $("#error").hidden = false;
       $("#error-message").textContent =
         (err && (err.message || String(err))) || "Failed to load feeds from Supabase.";
-      renderFooter(null, null);
+      renderFooter(null, null, null);
     }
   }
 

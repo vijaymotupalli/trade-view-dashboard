@@ -9,14 +9,23 @@
   let opts = null;
 
   function collectSymbols() {
-    const set = new Set();
+    const visible = [];
+    const hidden = [];
     document.querySelectorAll(".js-live-price[data-ticker]").forEach((el) => {
       const sym = String(el.getAttribute("data-ticker") || "")
         .trim()
         .toUpperCase();
-      if (sym) set.add(sym);
+      if (!sym) return;
+      const panel = el.closest(".tab-panel");
+      if (panel && panel.hidden) hidden.push(sym);
+      else visible.push(sym);
     });
-    return [...set].slice(0, MAX_SYMBOLS);
+    const set = new Set();
+    visible.concat(hidden).forEach((sym) => {
+      if (set.size >= MAX_SYMBOLS) return;
+      set.add(sym);
+    });
+    return [...set];
   }
 
   function applyQuotes(quotes) {

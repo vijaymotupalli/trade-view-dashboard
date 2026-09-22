@@ -27,7 +27,7 @@
       </div>
     </div>
     <div class="header-meta">
-      <span id="feed-badge" class="feed-badge" title="Data from Cary market intelligence + stocks feed" hidden>Live feeds</span>
+      <span id="feed-badge" class="feed-badge" title="Data from Cary market, stocks, and Cassy feeds" hidden>Live feeds</span>
       <span id="live-price-stamp" class="meta-chip" hidden>Live prices</span>
       <span id="generated-badge" class="meta-chip" hidden>Loading...</span>
       <div id="auth-user" class="auth-user" hidden>
@@ -83,6 +83,7 @@
       <nav class="tab-bar" role="tablist" aria-label="Dashboard sections">
         <button type="button" class="tab-btn" role="tab" id="tab-btn-market" aria-controls="panel-market" aria-selected="false" data-tab="market">Market</button>
         <button type="button" class="tab-btn" role="tab" id="tab-btn-stocks" aria-controls="panel-stocks" aria-selected="false" data-tab="stocks">Stocks</button>
+        <button type="button" class="tab-btn" role="tab" id="tab-btn-cassy" aria-controls="panel-cassy" aria-selected="false" data-tab="cassy">Cassy</button>
       </nav>
 
       <section id="panel-market" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-market" hidden>
@@ -91,6 +92,10 @@
 
       <section id="panel-stocks" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-stocks" hidden>
         <div id="stocks-root"></div>
+      </section>
+
+      <section id="panel-cassy" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-cassy" hidden>
+        <div id="cassy-root"></div>
       </section>
     </div>
   </main>
