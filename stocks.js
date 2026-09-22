@@ -314,15 +314,30 @@
     );
   }
 
+  function rowList(rows) {
+    if (Array.isArray(rows)) return rows.filter((row) => row && typeof row === "object");
+    if (rows && typeof rows === "object") {
+      return Object.keys(rows).map((key) => {
+        const row = rows[key];
+        if (!row || typeof row !== "object" || Array.isArray(row)) return { ticker: key };
+        if (!row.ticker && !row.symbol) return Object.assign({ ticker: key }, row);
+        return row;
+      });
+    }
+    return [];
+  }
+
   function sortDashboard(rows) {
-    return [...(rows || [])].sort((a, b) => {
-      const ca = CLASS_ORDER[a.class] ?? 99;
-      const cb = CLASS_ORDER[b.class] ?? 99;
+    return rowList(rows).sort((a, b) => {
+      const left = a && typeof a === "object" ? a : {};
+      const right = b && typeof b === "object" ? b : {};
+      const ca = CLASS_ORDER[left.class] ?? 99;
+      const cb = CLASS_ORDER[right.class] ?? 99;
       if (ca !== cb) return ca - cb;
-      const tb = Date.parse(b.post_time_et || "") || 0;
-      const ta = Date.parse(a.post_time_et || "") || 0;
+      const tb = Date.parse(right.post_time_et || "") || 0;
+      const ta = Date.parse(left.post_time_et || "") || 0;
       if (tb !== ta) return tb - ta;
-      return String(a.ticker).localeCompare(String(b.ticker));
+      return String(left.ticker || "").localeCompare(String(right.ticker || ""));
     });
   }
 
@@ -389,14 +404,15 @@
   }
 
   function resolveDashboardRows(data, resilient) {
-    const dashboard = Array.isArray(data.dashboard) ? data.dashboard : null;
-    if (!resilient) return data.dashboard;
-    if (dashboard && dashboard.length) return dashboard;
-    const posts = Array.isArray(data.posts) ? data.posts : null;
-    if (posts && posts.length) return posts.map(tickerToRow);
-    const tickers = Array.isArray(data.tickers) ? data.tickers : [];
+    const source = data && typeof data === "object" ? data : {};
+    const dashboard = rowList(source.dashboard);
+    if (!resilient) return dashboard;
+    if (dashboard.length) return dashboard;
+    const posts = rowList(source.posts);
+    if (posts.length) return posts.map(tickerToRow);
+    const tickers = rowList(source.tickers);
     if (tickers.length) return tickers.map(tickerToRow);
-    return dashboard || [];
+    return [];
   }
 
   function renderPostCell(row, resilient) {
@@ -452,6 +468,7 @@
     } else {
       tableBody = sorted
         .map((rawRow, idx) => {
+          try {
           const matched =
             findTickerDetail(tickers, rawRow && (rawRow.ticker || rawRow.symbol)) ||
             (resilient ? rawRow && rawRow._detail : null);
@@ -539,6 +556,10 @@
             "</div></td></tr>";
 
           return mainRow + expandRow;
+          } catch (err) {
+            console.error(err);
+            return "";
+          }
         })
         .join("");
     }

@@ -260,6 +260,17 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     cassy: "cassy",
   };
 
+  function coercePayload(value) {
+    if (typeof value !== "string") return value;
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch {
+      /* payload stayed a string */
+    }
+    return value;
+  }
+
   async function fetchFeeds() {
     const { data, error } = await supabase
       .from("dashboard_feeds")
@@ -272,12 +283,13 @@ if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
     let cassyData = null;
     (data || []).forEach((row) => {
       const id = row && String(row.id || "").trim();
-      if (id === FEED_IDS.stocks) stocksData = row.payload;
-      else if (id === FEED_IDS.stocksLegacy) stocksLegacy = row.payload;
+      const payload = coercePayload(row && row.payload);
+      if (id === FEED_IDS.stocks) stocksData = payload;
+      else if (id === FEED_IDS.stocksLegacy) stocksLegacy = payload;
       else if (id === FEED_IDS.market) {
-        marketData = row.payload;
+        marketData = payload;
         marketUpdatedAt = row.updated_at || null;
-      } else if (id === FEED_IDS.cassy) cassyData = row.payload;
+      } else if (id === FEED_IDS.cassy) cassyData = payload;
     });
     // Prefer `stocks`; fall back to legacy feed id `han_view`.
     if (!stocksData) stocksData = stocksLegacy;
